@@ -1,0 +1,8 @@
+---
+- name: list hosts and ip 
+  become: false
+  gather_facts: false 
+  hosts: tag_project_stretch_aws 
+  tasks:
+    - name: list instances
+      debug: var=ansible_all_ipv4_addresses

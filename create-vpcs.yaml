@@ -1,0 +1,873 @@
+---
+- name: create vpcs
+  hosts: localhost
+  become: false
+  gather_facts: false
+  tasks:
+  - name: create first vpc
+    ec2_vpc_net:
+      name: ocp-vpc
+      cidr_block: 10.10.0.0/16
+      region: "{{ region }}" 
+      tags:
+        project: multi-vpc
+        purpose: ocp
+    register: master_vpc
+
+  - name: create second vpc
+    ec2_vpc_net:
+      name: app-vpc
+      cidr_block: 10.11.0.0/16
+      region: "{{ region }}" 
+      tags:
+        project: multi-vpc
+        purpose: application
+    register: app_vpc
+
+  - name: Create subnet for ocp
+    ec2_vpc_subnet:
+      state: present
+      vpc_id: "{{ master_vpc.vpc.id }}" 
+      az: "{{ region }}a"
+      map_public: yes
+      region: "{{ region }}"
+      cidr: 10.10.1.0/24
+      resource_tags:
+        Name: az1
+        project: multi-vpc
+    register: az1_subnet
+
+  - name: Create subnet for ocp
+    ec2_vpc_subnet:
+      state: present
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      az: "{{ region }}b"
+      map_public: yes
+      region: "{{ region }}" 
+      cidr: 10.10.2.0/24
+      resource_tags:
+        Name: az2
+        project: multi-vpc
+    register: az2_subnet
+
+  - name: Create subnet for ocp
+    ec2_vpc_subnet:
+      state: present
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      az: "{{ region }}c"
+      map_public: yes
+      region: "{{ region }}" 
+      cidr: 10.10.3.0/24
+      resource_tags:
+        Name: az3
+        project: multi-vpc
+    register: az3_subnet
+
+  - name: Create subnet for app
+    ec2_vpc_subnet:
+      state: present
+      vpc_id: "{{ app_vpc.vpc.id }}"
+      cidr: 10.11.1.0/24
+      az: "{{ region }}a"
+      map_public: yes
+      region: "{{ region }}" 
+      resource_tags:
+        Name: az1
+        project: multi-vpc
+    register: app_subnet
+
+  - name: Create Internet Gateway for VPC
+    ec2_vpc_igw:
+       vpc_id: "{{ master_vpc.vpc.id }}"
+       region: "{{ region }}"
+       state: "present"
+    register: vpc_igw1 
+
+  - name: Create Internet Gateway for VPC
+    ec2_vpc_igw:
+       vpc_id: "{{ app_vpc.vpc.id }}"
+       region: "{{ region }}"
+       state: "present"
+    register: vpc_igw2
+
+  - name: Create local account VPC peering Connection
+    ec2_vpc_peer:
+      region: "{{ region }}"
+      vpc_id: "{{ master_vpc.vpc.id }}" 
+      peer_vpc_id: "{{ app_vpc.vpc.id }}"
+      state: present
+      tags:
+        project: multi-vpc
+    register: vpc_peer
+
+  - name: Accept local VPC peering request
+    ec2_vpc_peer:
+      region: "{{ region }}" 
+      peering_id: "{{ vpc_peer.peering_id }}"
+      state: accept
+    register: action_peer
+
+  - name: Add peering to route table
+    ec2_vpc_route_table:
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      region: "{{ region }}"
+      tags:
+        Name: "Public"
+      subnets:
+        - "{{ az1_subnet.subnet.id }}"
+        - "{{ az2_subnet.subnet.id }}"
+        - "{{ az3_subnet.subnet.id }}"
+      routes:
+        - dest: "10.11.0.0/16"
+          gateway_id: "{{ action_peer.peering_id }}"
+        - dest: "0.0.0.0/0"
+          gateway_id: "{{ vpc_igw1.gateway_id }}"
+
+
+  - name: Add peering to route table
+    ec2_vpc_route_table:
+      vpc_id: "{{ app_vpc.vpc.id }}"
+      region: "{{ region }}"
+      tags:
+        Name: "Public"
+      subnets:
+        - "{{ app_subnet.subnet.id }}"
+      routes:
+        - dest: "10.10.0.0/16"
+          gateway_id: "{{ action_peer.peering_id }}"
+        - dest: "0.0.0.0/0"
+          gateway_id: "{{ vpc_igw2.gateway_id }}"
+
+  - name: Create Master Security Group
+    ec2_group:
+      name: "master"
+      description: "Master"
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      region: "{{ region }}"
+      rules:
+        - proto: "tcp"
+          from_port: "22"
+          to_port: "22"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "443"
+          to_port: "443"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "2379"
+          to_port: "2379"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "2380"
+          to_port: "2380"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "10250"
+          to_port: "10250"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "8053"
+          to_port: "8053"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "4789"
+          to_port: "4789"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "8053"
+          to_port: "8053"
+          cidr_ip: "0.0.0.0/0"
+    register: master_sg
+
+  - name: Create Node Security Group
+    ec2_group:
+      name: "node"
+      description: "Node"
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      region: "{{ region }}"
+      rules:
+        - proto: "tcp"
+          from_port: "22"
+          to_port: "22"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "10250"
+          to_port: "10250"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "4789"
+          to_port: "4789"
+          cidr_ip: "0.0.0.0/0"
+    register: node_sg
+
+  - name: Create app Security Group
+    ec2_group:
+      name: "app"
+      description: "app"
+      vpc_id: "{{ app_vpc.vpc.id }}"
+      region: "{{ region }}"
+      rules:
+        - proto: "tcp"
+          from_port: "22"
+          to_port: "22"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "10250"
+          to_port: "10250"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "4789"
+          to_port: "4789"
+          cidr_ip: "0.0.0.0/0"
+    register: app_sg
+
+  - name: Create infra Security Group
+    ec2_group:
+      name: "infra"
+      description: "infra"
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      region: "{{ region }}"
+      rules:
+        - proto: "tcp"
+          from_port: "22"
+          to_port: "22"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "10250"
+          to_port: "10250"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "4789"
+          to_port: "4789"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "80"
+          to_port: "80"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "443"
+          to_port: "443"
+          cidr_ip: "0.0.0.0/0"
+    register: infra_sg
+
+  - name: Create ocs Security Group
+    ec2_group:
+      name: "ocs"
+      description: "ocs"
+      vpc_id: "{{ master_vpc.vpc.id }}"
+      region: "{{ region }}"
+      rules:
+        - proto: "tcp"
+          from_port: "22"
+          to_port: "22"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          from_port: "10250"
+          to_port: "10250"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "udp"
+          from_port: "4789"
+          to_port: "4789"
+          cidr_ip: "0.0.0.0/0"
+        - proto: "tcp"
+          ports:
+          - 2222
+          - 24010
+          - 3260
+          - 111
+          - 24007-24008
+          - 49152-49664
+          cidr_ip: "10.10.0.0/16"
+        - proto: "tcp"
+          ports:
+          - 2222
+          - 24010
+          - 3260
+          - 111
+          - 24007-24008
+          - 49152-49664
+          cidr_ip: "10.11.0.0/16"
+    register: ocs_sg
+
+- name: create aws instances
+  hosts: localhost
+  become: false
+  gather_facts: false
+  vars:
+     keypair: OSE-key 
+  tasks:
+    - name: create master
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.xlarge
+        region: "{{ region }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        group_id: "{{ master_sg.group_id }}"
+        vpc_subnet_id: "{{ az1_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc 
+           Name: master
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+      register: master1_east_2
+
+    - name: create infra
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.xlarge
+        region: "{{ region }}"
+        group_id: "{{ infra_sg.group_id }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        vpc_subnet_id: "{{ az1_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: infra
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+      register: infra1_east_2
+
+#    - name: create infra
+#      ec2:
+#        key_name: "{{ keypair }}"
+#        instance_type: m5.xlarge
+#        region: "{{ region }}"
+#        group_id: "{{ master_sg.group_id }}"
+#        image: "{{ ami }}"
+#        wait: yes
+#        count: 1
+#        vpc_subnet_id: "{{ az1_subnet.subnet.id }}"
+#        assign_public_ip: yes
+#        instance_tags:
+#           project: multi-vpc
+#           Name: infra
+#        volumes:
+#        - device_name: /dev/xvda
+#          volume_size: 100
+#          delete_on_termination: true
+#        - device_name: /dev/sdb
+#          volume_size: 50
+#          delete_on_termination: true
+#      register: infra2_east_2
+
+#    - name: create infra
+#      ec2:
+#        key_name: "{{ keypair }}"
+#        instance_type: m5.xlarge
+#        region: "{{ region }}"
+#        group_id: sg-4f402825
+#        image: ami-8f2617ea
+#        wait: yes
+#        count: 1
+#        vpc_subnet_id: "{{ az3_subnet.subnet.id }}"
+#        assign_public_ip: yes
+#        instance_tags:
+#           project: multi-vpc
+#           Name: infra
+#        volumes:
+#        - device_name: /dev/xvda
+#          volume_size: 100
+#          delete_on_termination: true
+#        - device_name: /dev/sdb
+#          volume_size: 50
+#          delete_on_termination: true
+#      register: infra3_east_2
+
+    - name: create app
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.large
+        group_id: "{{ app_sg.group_id }}"
+        region: "{{ region }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        vpc_subnet_id: "{{ app_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: app
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+      register: app1_east_2
+
+    - name: create app
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.large
+        group_id: "{{ app_sg.group_id }}"
+        region: "{{ region }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        vpc_subnet_id: "{{ app_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: app
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+      register: app2_east_2
+
+    - name: create ocs
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.large
+        group_id: "{{ ocs_sg.group_id }}"
+        region: "{{ region }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        vpc_subnet_id: "{{ az1_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: ocs
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+        - device_name: /dev/sdc
+          volume_size: 50
+          delete_on_termination: true
+      register: ocs1_east_2
+
+    - name: create ocs
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.large
+        group_id: "{{ ocs_sg.group_id }}"
+        region: "{{ region }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        vpc_subnet_id: "{{ az2_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: ocs
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+        - device_name: /dev/sdc
+          volume_size: 50
+          delete_on_termination: true
+      register: ocs2_east_2
+
+    - name: create ocs
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: m5.large
+        region: "{{ region }}"
+        image: ami-8f2617ea
+        group_id: "{{ ocs_sg.group_id }}" 
+        wait: yes
+        count: 1
+        vpc_subnet_id: "{{ az3_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: ocs
+        volumes:
+        - device_name: /dev/xvda
+          volume_size: 100
+          delete_on_termination: true
+        - device_name: /dev/sdb
+          volume_size: 50
+          delete_on_termination: true
+        - device_name: /dev/sdc
+          volume_size: 50
+          delete_on_termination: true
+      register: ocs3_east_2
+
+    - name: create bastion
+      ec2:
+        key_name: "{{ keypair }}"
+        instance_type: t2.small
+        region: "{{ region }}"
+        image: "{{ ami }}"
+        wait: yes
+        count: 1
+        group_id: "{{ node_sg.group_id }}"
+        vpc_subnet_id: "{{ az1_subnet.subnet.id }}"
+        assign_public_ip: yes
+        instance_tags:
+           project: multi-vpc
+           Name: bastion
+      register: bastion_east_2
+
+    - name: Add new instance to host group
+      add_host:
+        hostname: "{{ item.public_ip }}"
+        groupname: ocp
+      with_items:
+      - "{{ master1_east_2.instances }}"
+      - "{{ infra1_east_2.instances }}"
+#      - "{{ infra2_east_2.instances }}"
+#      - "{{ infra3_east_2.instances }}"
+      - "{{ app1_east_2.instances }}"
+      - "{{ app2_east_2.instances }}"
+      - "{{ ocs1_east_2.instances }}"
+      - "{{ ocs2_east_2.instances }}"
+      - "{{ ocs3_east_2.instances }}"
+
+    - name: Add new instance to host group
+      add_host:
+        hostname: "{{ item.public_ip }}"
+        groupname: ocs
+      with_items:
+      - "{{ ocs1_east_2.instances }}"
+      - "{{ ocs2_east_2.instances }}"
+      - "{{ ocs3_east_2.instances }}"
+
+    - name: Add new instance to host group
+      add_host:
+        hostname: "{{ item.public_ip }}"
+        groupname: bastion
+      with_items:
+      - "{{ bastion_east_2.instances }}"
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ item.public_ip }}"
+        port: 22
+        delay: 40
+        timeout: 320
+        state: started
+      with_items:
+      - "{{ master1_east_2.instances }}"
+      - "{{ infra1_east_2.instances }}"
+#      - "{{ infra2_east_2.instances }}"
+#      - "{{ infra3_east_2.instances }}"
+      - "{{ app1_east_2.instances }}"
+      - "{{ app2_east_2.instances }}"
+      - "{{ ocs1_east_2.instances }}"
+      - "{{ ocs2_east_2.instances }}"
+      - "{{ ocs3_east_2.instances }}"
+      - "{{ bastion_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        zone: "{{ domain }}"
+        overwrite: yes
+        record: master.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ master1_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        zone: "{{ domain }}"
+        overwrite: yes
+        record: infra1.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ infra1_east_2.instances }}"
+
+#    - name: dns
+#      route53:
+#        state: present
+#        zone: "{{ domain }}"
+#        overwrite: yes
+#        record: infra2.{{ domain }}
+#        type: A
+#        ttl: 60
+#        value: "{{ item.public_ip }}"
+#      with_items:
+#      - "{{ infra2_east_2.instances }}"
+
+#    - name: dns
+#      route53:
+#        state: present
+#        zone: "{{ domain }}"
+#        overwrite: yes
+#        record: infra3.{{ domain }}
+#        type: A
+#        ttl: 60
+#        value: "{{ item.public_ip }}"
+#      with_items:
+#      - "{{ infra3_east_2.instances }}"
+
+    - name: set_facts
+      set_fact:
+         infra1_ip: "{{ item.public_ip }}"
+      with_items:
+      - "{{ infra1_east_2.instances }}"
+
+#    - name: set_facts
+#      set_fact:
+#         infra2_ip: "{{ item.public_ip }}"
+#      with_items:
+#      - "{{ infra2_east_2.instances }}"
+
+#    - name: set_facts
+#      set_fact:
+#         infra3_ip: "{{ item.public_ip }}"
+#      with_items:
+#      - "{{ infra3_east_2.instances }}"
+
+    - name: "Create Route53 wildcard CNAME record"
+      route53:
+        command: create
+        overwrite: yes
+        private_zone: no
+        record: "*.apps.{{ domain }}"
+        type: A
+        ttl: 60
+        value:
+         - "{{ infra1_ip }}"
+#         - "{{ infra2_ip }}"
+#         - "{{ infra3_ip }}"
+        zone: "{{ domain }}"
+
+    - name: dns
+      route53:
+        state: present
+        overwrite: yes
+        zone: "{{ domain }}"
+        record: app1.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ app1_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        overwrite: yes
+        zone: "{{ domain }}"
+        record: app2.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ app2_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        zone: "{{ domain }}"
+        overwrite: yes
+        record: ocs1.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ ocs1_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        zone: "{{ domain }}"
+        overwrite: yes
+        record: ocs2.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ ocs2_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        zone: "{{ domain }}"
+        overwrite: yes
+        record: ocs3.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ ocs3_east_2.instances }}"
+
+    - name: dns
+      route53:
+        state: present
+        zone: "{{ domain }}"
+        overwrite: yes
+        record: bastion.{{ domain }}
+        type: A
+        ttl: 60
+        value: "{{ item.public_ip }}"
+      with_items:
+      - "{{ bastion_east_2.instances }}"
+
+- name: register and add repos
+  hosts: ocp 
+  become: True
+  gather_facts: false
+  tasks:
+    - name: register instances
+      redhat_subscription:
+        state: present
+        username: "{{ rhsm_user }}"
+        password: "{{ rhsm_password }}"
+        pool_ids: "{{ rhsm_pool }}"
+
+    - name: repos
+      shell: 'subscription-manager repos --disable="*" --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.10-rpms" --enable="rhel-7-fast-datapath-rpms" --enable="rhel-7-server-ansible-2.4-rpms"'
+
+    - name: install packages
+      yum:
+        state: latest
+        name: "{{ item }}"
+      with_items:
+      - docker
+      - iptables
+      - iptables-services
+
+    - name: populate the docker-storage-setup file
+      copy:
+        dest: /etc/sysconfig/docker-storage-setup
+        src: docker-storage-setup
+    - name: start iptables
+      service:
+        name: iptables
+        enabled: yes
+        state: started
+
+- name: register and add repos
+  hosts: ocp
+  become: True
+  gather_facts: false
+  tasks:
+    - name: start docker
+      service:
+        name: docker
+        enabled: yes
+        state: started
+
+- name: register and add repos
+  hosts: ocs
+  become: True
+  gather_facts: false
+  tasks:
+    - name: add gluster pool
+      command: "subscription-manager attach --pool={{ gluster_pool }}"
+
+    - name: repos
+      shell: 'subscription-manager repos --disable="*" --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.10-rpms" --enable="rhel-7-fast-datapath-rpms" --enable="rhel-7-server-ansible-2.4-rpms" --enable="rh-gluster-3-for-rhel-7-server-rpms"'
+
+- name: register and add repos
+  hosts: bastion
+  become: True
+  gather_facts: false
+  tasks:
+    - name: register instances
+      redhat_subscription:
+        state: present
+        username: "{{ rhsm_user }}"
+        password: "{{ rhsm_password }}"
+        pool_ids: "{{ rhsm_pool }}"
+
+    - name: repos
+      shell: 'subscription-manager repos --disable="*" --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.10-rpms" --enable="rhel-7-fast-datapath-rpms" --enable="rhel-7-server-ansible-2.4-rpms"'
+
+    - name: install packages
+      yum:
+        state: latest
+        name: "{{ item }}"
+      with_items:
+      - git
+      - openshift-ansible
+
+- name: create inventory file
+  hosts: localhost 
+  become: false
+  gather_facts: false
+  tasks:
+    - name: set private name
+      set_fact:
+         master1_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ master1_east_2.instances }}"
+
+    - name: set private name
+      set_fact:
+         infra1_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ infra1_east_2.instances }}"
+
+    - name: set private name
+      set_fact:
+         app1_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ app1_east_2.instances }}"
+
+    - name: set private name
+      set_fact:
+         app2_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ app2_east_2.instances }}"
+
+    - name: set private name
+      set_fact:
+         ocs1_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ ocs1_east_2.instances }}"
+
+    - name: set private name
+      set_fact:
+         ocs2_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ ocs2_east_2.instances }}"
+
+    - name: set private name
+      set_fact:
+         ocs3_hostname: "{{ item.private_dns_name }}"
+      with_items:
+      - "{{ ocs3_east_2.instances }}"
+
+    - name: create the template
+      template:
+        src: inventory-template.j2
+        dest: mulit-vpc-inventory
+
+- name: copy the inventory file
+  hosts: bastion 
+  become: true
+  gather_facts: false
+  tasks:
+    - name: create the template
+      copy:
+        src: mulit-vpc-inventory 
+        dest: /etc/ansible/hosts
+
