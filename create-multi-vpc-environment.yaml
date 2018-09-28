@@ -786,29 +786,6 @@
     - name: repos
       shell: 'subscription-manager repos --disable="*" --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.10-rpms" --enable="rhel-7-fast-datapath-rpms" --enable="rhel-7-server-ansible-2.4-rpms" --enable="rh-gluster-3-for-rhel-7-server-rpms"'
 
-- name: register and add repos
-  hosts: bastion
-  become: True
-  gather_facts: false
-  tasks:
-    - name: register instances
-      redhat_subscription:
-        state: present
-        username: "{{ rhsm_user }}"
-        password: "{{ rhsm_password }}"
-        pool_ids: "{{ rhsm_pool }}"
-
-    - name: repos
-      shell: 'subscription-manager repos --disable="*" --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.10-rpms" --enable="rhel-7-fast-datapath-rpms" --enable="rhel-7-server-ansible-2.4-rpms"'
-
-    - name: install packages
-      yum:
-        state: latest
-        name: "{{ item }}"
-      with_items:
-      - git
-      - openshift-ansible
-
 - name: create inventory file
   hosts: localhost 
   become: false
@@ -860,14 +837,4 @@
       template:
         src: inventory-template.j2
         dest: mulit-vpc-inventory
-
-- name: copy the inventory file
-  hosts: bastion 
-  become: true
-  gather_facts: false
-  tasks:
-    - name: create the template
-      copy:
-        src: mulit-vpc-inventory 
-        dest: /etc/ansible/hosts
 

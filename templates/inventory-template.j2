@@ -30,12 +30,44 @@ containerized=False
 openshift_disable_check=memory_availability,disk_availability,docker_storage,package_version,docker_image_availability,package_availability
 #openshift_logging_install_logging=false
 
-openshift_storage_glusterfs_is_native=false
-openshift_storage_glusterfs_storageclass=true
-openshift_storage_glusterfs_heketi_is_native=true
-
 # metrics
 openshift_hosted_metrics_deploy=false
+
+# registry
+openshift_hosted_registry_storage_kind=glusterfs
+openshift_hosted_registry_storage_volume_size=10Gi
+openshift_hosted_registry_selector="node-role.kubernetes.io/infra=true"
+   
+# Container image to use for glusterfs pods
+openshift_storage_glusterfs_image="registry.access.redhat.com/rhgs3/rhgs-server-rhel7:v3.10"
+  
+# Container image to use for glusterblock-provisioner pod
+openshift_storage_glusterfs_block_image="registry.access.redhat.com/rhgs3/rhgs-gluster-block-prov-rhel7:v3.10"
+  
+# Container image to use for heketi pods
+openshift_storage_glusterfs_heketi_image="registry.access.redhat.com/rhgs3/rhgs-volmanager-rhel7:v3.10"
+    
+    
+# registry
+openshift_hosted_registry_storage_kind=glusterfs
+openshift_hosted_registry_storage_volume_size=10Gi
+openshift_hosted_registry_selector="node-role.kubernetes.io/infra=true"
+
+# Container image to use for glusterfs pods
+openshift_storage_glusterfs_image="registry.access.redhat.com/rhgs3/rhgs-server-rhel7:v3.10"
+
+# Container image to use for glusterblock-provisioner pod
+openshift_storage_glusterfs_block_image="registry.access.redhat.com/rhgs3/rhgs-gluster-block-prov-rhel7:v3.10"
+
+# Container image to use for heketi pods
+openshift_storage_glusterfs_heketi_image="registry.access.redhat.com/rhgs3/rhgs-volmanager-rhel7:v3.10"
+
+
+# CNS storage cluster
+openshift_storage_glusterfs_namespace=app-storage
+openshift_storage_glusterfs_storageclass=true
+openshift_storage_glusterfs_storageclass_default=true
+openshift_storage_glusterfs_block_deploy=false
 
 [etcd]
 {{ master1_hostname }} openshift_public_hostname=master.{{ domain }}
@@ -44,9 +76,9 @@ openshift_hosted_metrics_deploy=false
 {{ master1_hostname }} openshift_public_hostname=master.{{ domain }}
 
 [glusterfs]
-{{ ocs1_hostname }} glusterfs_devices="[ "/dev/nvme3n1" ]" openshift_public_hostname=ocs1.{{ domain }}
-{{ ocs2_hostname }} glusterfs_devices="[ "/dev/nvme3n1" ]" openshift_public_hostname=ocs2.{{ domain }}
-{{ ocs3_hostname }} glusterfs_devices="[ "/dev/nvme3n1" ]" openshift_public_hostname=ocs3.{{ domain }}
+{{ ocs1_hostname }} glusterfs_devices='["/dev/nvme3n1"]'
+{{ ocs2_hostname }} glusterfs_devices='["/dev/nvme3n1"]'
+{{ ocs3_hostname }} glusterfs_devices='["/dev/nvme3n1"]'
 
 [nodes]
 {{ master1_hostname }} openshift_node_group_name='node-config-master' openshift_public_hostname=master.{{ domain }}
