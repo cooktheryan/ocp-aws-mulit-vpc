@@ -8,10 +8,12 @@ python2-boto3-1.4.6-1.el7.noarch
 
 python2-boto-2.45.0-3.el7.noarch
 
-
 # To create the instances first export the following
 AWS_SECRET_ACCESS_KEY=g/8PmDNYHVSSFDDFSDFSFDFDFSDFSFSSFFbWQpjH
 AWS_ACCESS_KEY_ID=BKIRSAFETYDANCE
+
+# Authentication
+Modify templates/inventory-template.j2 to use the OpenShift authentication mechanism that you prefer.
 
 # To launch an environment
 ansible-playbook -e 'region=REGION gluster_pool=ALPHA_NUMERIC_POOL_ID rhsm_user=USER rhsm_password=PASSWORD rhsm_pool=ALPHA_NUMERIC_POOL_ID domain=domain.com ami=ami-04268981d7c33264d' create-multi-vpc-environment.yaml	
